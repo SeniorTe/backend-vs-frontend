@@ -1,66 +1,125 @@
 package ru.netology.test;
 
-import com.codeborne.selenide.Configuration;
+import io.restassured.response.Response;
 import lombok.SneakyThrows;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
+import org.apache.commons.dbutils.QueryRunner;
+import org.apache.commons.dbutils.handlers.ScalarHandler;
+import org.json.JSONObject;
 import org.junit.jupiter.api.Test;
-import ru.netology.data.DataHelper;
-import ru.netology.data.Requests;
-import ru.netology.page.DashboardPage;
-import ru.netology.page.LoginPage;
 
-import static com.codeborne.selenide.Selenide.open;
+import java.sql.DriverManager;
+import java.sql.SQLOutput;
+
+import static io.restassured.RestAssured.given;
+import static io.restassured.RestAssured.when;
+import static org.hamcrest.Matchers.*;
 
 class Tests {
 
-    @BeforeEach
-    void setup() {
-        Configuration.holdBrowserOpen = true;
-        open("http://localhost:9999");
-    }
-
-    @AfterAll
-    static void cleanBase() {
-        Requests.cleanDataBase();
-    }
-
-    @Test
     @SneakyThrows
-    void shouldLogIn() {
-        var loginPage = new LoginPage();
-        var authInfo = DataHelper.getAuthInfo();
-        var verificationPage = loginPage.validLogin(authInfo);
-        var verificationCode = Requests.getAuthCode();
-        DashboardPage dashboardPage = verificationPage.validVerify(verificationCode);
-        dashboardPage.dashboardPageVisible();
+    public static String getAuthCode() {
+        var codeSQLFromSelectCode = "SELECT code FROM auth_codes ORDER BY created DESC LIMIT 1";
+        var runner = new QueryRunner();
+        try (
+                var conn = DriverManager.getConnection(
+                        "jdbc:mysql://localhost:3306/app", "app", "pass");
+        ) {
+            var request = runner.query(conn, codeSQLFromSelectCode, new ScalarHandler<>());
+            return (String) request;
+        }
     }
 
-    @Test
-    void shouldNotLogInByIncorrectPass() {
-        var loginPage = new LoginPage();
-        var authInfo = DataHelper.getAuthInfoIncorrectPass();
-        loginPage.loginOtherUsers(authInfo);
-        loginPage.getInvalidPass();
-    }
+    JSONObject authBody = new JSONObject()
+            .put("login", "vasya")
+            .put("password", "qwerty123")
+            ;
+
+    JSONObject codeBody = new JSONObject()
+            .put("login", "vasya")
+            .put("code", getAuthCode())
+            ;
+
+    JSONObject transferBody = new JSONObject()
+            .put("from", "5559000000000002")
+            .put("to", "5559000000000001")
+            .put("amount", "5000")
+            ;
+
+    String token;
 
     @Test
-    @SneakyThrows
-    void shouldNotLogInByBlockedUser() {
-        var loginPage = new LoginPage();
-        Requests.setBlockedUser();
-        var authInfo = DataHelper.getAuthInfoBlockedUser();
-        loginPage.loginOtherUsers(authInfo);
-        loginPage.getBlockedUser();
+    void shouldReturnRest() {
+        given()
+                .baseUri("http://localhost:9999/api")
+                .contentType("application/json")
+                .body(authBody.toString())
+                .when()
+                .post("/auth")
+                .then()
+                .statusCode(200)
+                ;
+
     }
 
+//    @Test
+//    void testAuth() {
+//        given()
+//                .baseUri("http://localhost:9999/api")
+//                .contentType("application/json")
+//                .body(codeBody.toString())
+//                .when()
+//                .post("/auth/verification")
+//                .then()
+//                .statusCode(200)
+//        ;
+//    }
+
     @Test
-    @SneakyThrows
-    void shouldBlockSystemByThreeNotLogin() {
-        var loginPage = new LoginPage();
-        var authInfo = DataHelper.getAuthInfoIncorrectPass();
-        loginPage.loginOtherUsers(authInfo);
-        loginPage.getBlockedSystem();
+    void testCode() {
+        Response response = given()
+                .baseUri("http://localhost:9999/api")
+                .contentType("application/json")
+                .body(codeBody.toString())
+                .when()
+                .post("/auth/verification")
+                .then()
+                .statusCode(200)
+                .extract()
+                .response()
+        ;
+        token = response.path("token");
+        System.out.println(token);
     }
+
+//    @Test
+//    void testCards() {
+//        Response response = given()
+//                .header("Authorization","Bearer Token" + token)
+//                .baseUri("http://localhost:9999/api")
+//                .contentType("application/json")
+//                .when()
+//                .get("/cards")
+//                .then()
+//                .statusCode(200)
+//                .extract()
+//                .response()
+//                ;
+//        String cards = response.path("balance")
+//        System.out.println(cards);
+//    }
+
+    @Test
+    void testTransfer() {
+        given()
+                .header("Authorization", "Bearer Token" + token)
+                .baseUri("http://localhost:9999/api")
+                .contentType("application/json")
+                .body(transferBody.toString())
+                .when()
+                .post("/transfer")
+                .then()
+                .statusCode(200)
+        ;
+    }
+
 }
